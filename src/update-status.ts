@@ -5,7 +5,7 @@ import type { GenerationState } from "@/generation-state";
 export type UpdateStatus = {
   /** Name of the running update, or null when idle. */
   running: string | null;
-  /** The weights the running update ranks with. */
+  /** The weights the user last set, shown while an update runs. */
   weights: Weights | null;
 };
 

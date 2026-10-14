@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { Weights } from "@/best-action";
 import type { Slot } from "@/considerations";
 import { FINAL_PROMPT, PROMPTS } from "@/prompts";
-import { appendToBlock, generateIdeas, submitFeedback } from "./actions";
+import { appendToBlock, generateIdeas, rerankQueue, submitFeedback } from "./actions";
 import { GenerationStateBox, GenerationStatus, useServerStatus } from "./generation-status";
 
-const MEASURES = ["volatility", "valence", "risk", "surprisingness"] as const;
+const MEASURES = ["effort", "valence", "risk", "surprisingness"] as const;
 
 /** Measures whose weight runs -1–1, with labels for the two ends of the slider. */
-const ENDS = { volatility: ["stable", "upheaval"], risk: ["safe", "risky"] } as const;
+const ENDS = { effort: ["easy", "hard"], risk: ["safe", "risky"] } as const;
 
 /** A weight slider, 0–1 unless another minimum is given. */
 function Slider({
@@ -54,13 +54,23 @@ export function PromptBox({
   const [considerations, setConsiderations] = useState(initialConsiderations);
   const [weights, setWeights] = useState<Weights>({
     considerations: Array(7).fill(1),
-    volatility: 0, // appetite for change: -1 prefers stable, 1 prefers upheaval
+    effort: 0, // appetite for effort: -1 prefers easy, 1 prefers demanding
     valence: 1,
     risk: 0, // risk appetite: -1 prefers safe, 1 prefers risky
     surprisingness: 1,
   });
   const setConsiderationWeight = (i: number, v: number) =>
     setWeights((w) => ({ ...w, considerations: w.considerations.map((x, j) => (j === i ? v : x)) }));
+  // Re-rank the queue whenever the user touches the weights (debounced while a slider is dragged).
+  const firstWeights = useRef(true);
+  useEffect(() => {
+    if (firstWeights.current) {
+      firstWeights.current = false;
+      return;
+    }
+    const timer = setTimeout(() => rerankQueue(weights), 250);
+    return () => clearTimeout(timer);
+  }, [weights]);
   const prompt = PROMPTS[index] ?? FINAL_PROMPT;
   const status = useServerStatus();
 
@@ -85,9 +95,17 @@ export function PromptBox({
   }
 
   function generate() {
+    // With actions already queued the update runs in the background: keep showing them.
+    if (status.queued > 0) {
+      generateIdeas(weights, suggestion !== null).then((next) => {
+        if (next.suggestion) setSuggestion(next.suggestion);
+        setConsiderations(next.considerations);
+      });
+      return;
+    }
     startThinking(async () => {
       setSuggestion(null);
-      const next = await generateIdeas(weights);
+      const next = await generateIdeas(weights, false);
       setSuggestion(next.suggestion);
       setConsiderations(next.considerations);
     });

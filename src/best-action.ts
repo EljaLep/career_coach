@@ -1,25 +1,25 @@
 import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
-import { action, risk, subconsideration, subScore, valence, volatility } from "@/db/schema";
+import { action, effort, risk, subconsideration, subScore, valence } from "@/db/schema";
 
 const weight = z.number().min(0).max(1);
 
 /**
  * User-set weights: one per consideration slot, one per measure and one for surprisingness.
- * The volatility and risk weights run -1–1 as appetites: volatility -1 prefers stability, 1
- * prefers upheaval; risk -1 prefers safe actions, 1 prefers risky ones.
+ * The effort and risk weights run -1–1 as appetites: effort -1 prefers easy actions, 1
+ * prefers demanding ones; risk -1 prefers safe actions, 1 prefers risky ones.
  */
 export const Weights = z.object({
   considerations: z.array(weight).length(7),
-  volatility: z.number().min(-1).max(1),
+  effort: z.number().min(-1).max(1),
   valence: weight,
   risk: z.number().min(-1).max(1),
   surprisingness: weight,
 });
 export type Weights = z.infer<typeof Weights>;
 
-const MEASURES = ["volatility", "valence", "risk"] as const;
+const MEASURES = ["effort", "valence", "risk"] as const;
 type Scores = Record<(typeof MEASURES)[number], number | null>;
 
 type Slots = {
@@ -29,11 +29,11 @@ type Slots = {
 const values = (s: Slots) => [s.slot1, s.slot2, s.slot3, s.slot4, s.slot5, s.slot6, s.slot7];
 
 /**
- * How much an action moves a consideration, 0–1: the average of how much it disturbs it,
- * how strongly it costs or benefits it, and how risky it is for it (volatility and risk -1–1
+ * How much an action moves a consideration, 0–1: the average of how much effort it takes for it,
+ * how strongly it costs or benefits it, and how risky it is for it (effort and risk -1–1
  * mapped to 0–1).
  */
-const change = (s: Scores) => ((s.volatility! + 1) / 2 + Math.abs(2 * s.valence! - 1) + (s.risk! + 1) / 2) / 3;
+const change = (s: Scores) => ((s.effort! + 1) / 2 + Math.abs(2 * s.valence! - 1) + (s.risk! + 1) / 2) / 3;
 
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
@@ -41,15 +41,15 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
  * Scores every scored, unshown action and returns them best first. Per action, each scored
  * consideration's relevance is its weight × how much the action changes it; only the 2 most
  * relevant count. Each of those adds its weight × Σ (measure weight × the mean of its score and
- * its subconsiderations' scores on that measure); volatility and risk scores and weights run -1–1,
- * so a negative weight rewards stable/safe actions and a positive one disruptive/risky actions.
+ * its subconsiderations' scores on that measure); effort and risk scores and weights run -1–1,
+ * so a negative weight rewards easy/safe actions and a positive one demanding/risky actions.
  * On top, the action's surprisingness × its weight (0 until scored). Recomputed for every unshown action on each call.
  */
 export function rankActions(weights: Weights) {
   const rows = db
-    .select({ action, volatility, valence, risk })
+    .select({ action, effort, valence, risk })
     .from(action)
-    .innerJoin(volatility, eq(volatility.actionId, action.id))
+    .innerJoin(effort, eq(effort.actionId, action.id))
     .innerJoin(valence, eq(valence.actionId, action.id))
     .innerJoin(risk, eq(risk.actionId, action.id))
     .where(isNull(action.shownAt))
@@ -59,7 +59,7 @@ export function rankActions(weights: Weights) {
     .select({
       actionId: subScore.actionId,
       slot: subconsideration.slot,
-      volatility: subScore.volatility,
+      effort: subScore.effort,
       valence: subScore.valence,
       risk: subScore.risk,
     })
@@ -78,7 +78,7 @@ export function rankActions(weights: Weights) {
   return rows
     .map((row) => {
       const scores = (i: number): Scores => ({
-        volatility: values(row.volatility)[i],
+        effort: values(row.effort)[i],
         valence: values(row.valence)[i],
         risk: values(row.risk)[i],
       });

@@ -4176,3 +4176,766 @@ I do not have the history from the beginning. Below are the prompts from the sec
 ✻ Crunched for 1m 47s · done 15.05
 
 ※ recap: We're making the career planner's action suggestions more useful while keeping token costs down, and Submit now only gathers comments while Generate Ideas does all the model calls. Next, run `npm run db:push` and test a round.
+
+ ▐▛███▛█   Claude Code v2.1.300
+▝▜██████▀  Opus 5.5 · API Usage Billing
+ ▝▝   ▝▝   ~\strgy-projekti
+
+
+‼ Both profile and ANTHROPIC_API_KEY set · auth may not work as expected
+  · to use profile: Unset the ANTHROPIC_API_KEY environment variable, or claude /logout then say "No" to the API key approval before login.
+  · to use ANTHROPIC_API_KEY: Run `ant auth logout`, or remove the active profile under ~/.config/anthropic/configs/.
+
+> Change this so that the actions suggestion priority queue is ranked again     
+  everytime the user touches the weights                                        
+
+  Searched for 1 pattern, listed 1 directory (ctrl+o to expand)
+
+● The queue currently scores items on demand rather than storing ranked order,
+  and pruning uses stale weights from when the update started. I'll add a server
+  action to re-rank whenever sliders change, so the background prune and status
+  panel always use the latest weights.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Python isn't installed, so I'll make the edits with the Edit tool instead.
+
+  Read 2 files (ctrl+o to expand)
+
+● Update(src\app\actions.ts)
+  ⎿  Added 14 lines, removed 2 lines
+      45  /** How many of the lowest-scoring queued actions are deleted a
+          fter each batch of new ones. */
+      46  const PRUNE = 5;
+      47  
+      48 -/** The weights from the latest request, used to rank the queue
+         - in the background. */                                         
+      48 +/** The weights the user last set, used to rank the queue in th
+         +e background. */                                               
+      49  let latestWeights: Weights | null = null;
+      50  
+      51  /**
+      52 + * Re-ranks the queue with the weights the user just set. A run
+         +ning update picks them up too:                                 
+      53 + * they are published for the UI and used when it prunes the qu
+         +eue.                                                           
+      54 + */                                                            
+      55 +export async function rerankQueue(weights: Weights) {          
+      56 +  latestWeights = Weights.parse(weights);                      
+      57 +  if (updateStatus.running) updateStatus.weights = latestWeight
+         +s;                                                             
+      58 +  const ranked = rankActions(latestWeights);                   
+      59 +  console.log(`[queue] Weights changed; re-ranked ${ranked.leng
+         +th} queued action(s)`);                                        
+      60 +  for (const r of ranked.slice(0, 3)) console.log(`[queue]   + 
+         +(${r.score.toFixed(3)}) ${r.action.text}`);                    
+      61 +}                                                              
+      62 +                                                               
+      63 +/**                                                            
+      64   * The update currently running in the background, if any. Only
+           one runs at a time. It ranks
+      53 - * with the weights from when it started; those are published w
+         -ith its name for the UI.                                       
+      65 + * with the latest weights; those are published with its name f
+         +or the UI.                                                     
+      66   */
+      67  let running: Promise<void> | null = null;
+      68  function run(name: string, job: () => Promise<void>) {
+
+● Update(src\app\actions.ts)
+  ⎿  Added 2 lines, removed 2 lines
+      113  async function explore() {
+      114    const fresh = await generateActions(chooseGenerationState(al
+           lData()));
+      115    await Promise.all([foldSuggested(fresh.map((a) => a.text)), 
+           judgeActions(readSlots(), unshown())]);
+      116 -  // Rank with the weights the update started with (the ones t
+          -he UI shows).                                                 
+      117 -  const weights = updateStatus.weights;                       
+      116 +  // Rank with the latest weights (the ones the UI shows).    
+      117 +  const weights = latestWeights;                              
+      118    if (!weights) return;
+      119    const bottom = rankActions(weights).slice(-PRUNE);
+      120    console.log(`[queue] Re-ranked the queue; deleting the ${bot
+           tom.length} lowest-scoring action(s):`);
+
+● Update(src\app\prompt-box.tsx)
+  ⎿  Added 1 line, removed 1 line
+      1  "use client";
+      2  
+      3 -import { useState, useTransition } from "react";                
+      3 +import { useEffect, useRef, useState, useTransition } from "reac
+        +t";                                                             
+      4  import type { Weights } from "@/best-action";
+      5  import type { Slot } from "@/considerations";
+      6  import { FINAL_PROMPT, PROMPTS } from "@/prompts";
+
+● Update(src\app\prompt-box.tsx)
+  ⎿  Added 1 line, removed 1 line
+       4  import type { Weights } from "@/best-action";
+       5  import type { Slot } from "@/considerations";
+       6  import { FINAL_PROMPT, PROMPTS } from "@/prompts";
+       7 -import { appendToBlock, generateIdeas, submitFeedback } from ".
+         -/actions";                                                     
+       7 +import { appendToBlock, generateIdeas, rerankQueue, submitFeedb
+         +ack } from "./actions";                                        
+       8  import { GenerationStateBox, GenerationStatus, useServerStatus 
+          } from "./generation-status";
+       9  
+      10  const MEASURES = ["volatility", "valence", "risk", "surprisingn
+          ess"] as const;
+
+● Update(src\app\prompt-box.tsx)
+  ⎿  Added 10 lines
+      61    });
+      62    const setConsiderationWeight = (i: number, v: number) =>
+      63      setWeights((w) => ({ ...w, considerations: w.considerations
+          .map((x, j) => (j === i ? v : x)) }));
+      64 +  // Re-rank the queue whenever the user touches the weights (d
+         +ebounced while a slider is dragged).                           
+      65 +  const firstWeights = useRef(true);                           
+      66 +  useEffect(() => {                                            
+      67 +    if (firstWeights.current) {                                
+      68 +      firstWeights.current = false;                            
+      69 +      return;                                                  
+      70 +    }                                                          
+      71 +    const timer = setTimeout(() => rerankQueue(weights), 250); 
+      72 +    return () => clearTimeout(timer);                          
+      73 +  }, [weights]);                                               
+      74    const prompt = PROMPTS[index] ?? FINAL_PROMPT;
+      75    const status = useServerStatus();
+      76  
+
+● The queue is now re-ranked every time you move a weight slider. I haven't run
+  or tested it.
+
+  - In the browser (src/app/prompt-box.tsx): when any slider changes, it sends
+    the new weights to the server. While you're dragging, it waits until the
+    slider has been still for 250 ms so it doesn't send dozens of requests.
+  - On the server (src/app/actions.ts): a new rerankQueue(weights) saves the new
+    weights, re-ranks the queue and logs the top 3 actions as [queue]   + 
+    (score) text. If a Generate Ideas update is running, it switches to the new
+    weights too:
+    - The Generation status panel shows them.
+    - The step that deletes the 5 lowest-scoring actions uses them. Before, it
+      used the weights from when the update started, so moving a slider
+      mid-update didn't affect which actions got deleted.
+
+  Picking the next suggestion already used your current weights, so that part
+  works as before.
+
+  To try it: move a slider and look for Weights changed; re-ranked N queued 
+  action(s) in the dev server log, with the top 3 changing as you adjust
+  weights.
+
+✻ Churned for 42s · done 22.21
+
+※ recap: Your goal was to have the action queue re-ranked every time you move a weight slider, and that change is now in place but untested. Next, move a slider and check the dev server log for the "Weights changed; re-ranked" line. (disable recaps in /config)
+
+> After pressing Generate Ideas while there are already action items in the     
+  queue, there should not be the thinking text again. It should keep showing    
+  the excisting actions.                                                        
+
+  Read 1 file (ctrl+o to expand)
+
+● Now I'll change generateIdeas so it runs the update in the background whenever
+  the queue already has a scored action.
+
+● Update(src\app\actions.ts)
+  ⎿  Added 19 lines, removed 9 lines
+      145  /**
+      146   * The only place model calls happen: brings the consideration
+           s up to date with the gathered
+      147   * data, chooses a new random generation state, generates and 
+           judges new actions, then suggests
+      148 - * the best one.                                              
+      148 + * the best one. If the queue already has a scored action, the
+          + update runs in the background and                            
+      149 + * the answer comes at once: null (keep the shown suggestion) 
+          +when `showing`, else the best queued                          
+      150 + * action.                                                    
+      151   */
+      150 -export async function generateIdeas(weights: Weights) {       
+      152 +export async function generateIdeas(weights: Weights, showing:
+          + boolean) {                                                   
+      153    latestWeights = Weights.parse(weights);
+      154    console.log("[ideas] Generate Ideas pressed");
+      153 -  if (running) {                                              
+      154 -    console.log("[ideas] An update is running; waiting for it 
+          -to finish first");                                            
+      155 -    await running;                                            
+      155 +  // run() catches its own errors, so this never rejects.     
+      156 +  const update = (async () => {                               
+      157 +    if (running) {                                            
+      158 +      console.log("[ideas] An update is running; waiting for i
+          +t to finish first");                                          
+      159 +      await running;                                          
+      160 +    }                                                         
+      161 +    await run("Generate Ideas", async () => {                 
+      162 +      await updateConsiderations();                           
+      163 +      await explore();                                        
+      164 +    });                                                       
+      165 +  })();                                                       
+      166 +  if (bestAction(latestWeights)) {                            
+      167 +    console.log("[ideas] Queue has actions; updating in the ba
+          +ckground");                                                   
+      168 +    return { suggestion: showing ? null : await takeBest(weigh
+          +ts), considerations: readSlots() };                           
+      169    }
+      157 -  await run("Generate Ideas", async () => {                   
+      158 -    await updateConsiderations();                             
+      159 -    await explore();                                          
+      160 -  });                                                         
+      170 +  await update;                                               
+      171    return { suggestion: await takeBest(weights), considerations
+           : readSlots() };
+      172  }
+      173  
+
+● Now the client: skip "Thinking…" when the queue isn't empty.
+
+● Update(src\app\prompt-box.tsx)
+  ⎿  Added 9 lines, removed 1 line
+       95    }
+       96  
+       97    function generate() {
+       98 +    // With actions already queued the update runs in the back
+          +ground: keep showing them.                                    
+       99 +    if (status.queued > 0) {                                  
+      100 +      generateIdeas(weights, suggestion !== null).then((next) 
+          +=> {                                                          
+      101 +        if (next.suggestion) setSuggestion(next.suggestion);  
+      102 +        setConsiderations(next.considerations);               
+      103 +      });                                                     
+      104 +      return;                                                 
+      105 +    }                                                         
+      106      startThinking(async () => {
+      107        setSuggestion(null);
+      100 -      const next = await generateIdeas(weights);              
+      108 +      const next = await generateIdeas(weights, false);       
+      109        setSuggestion(next.suggestion);
+      110        setConsiderations(next.considerations);
+      111      });
+
+● When the queue already has actions, Generate Ideas no longer shows
+  "Thinking…". The update runs in the background and the current suggestion
+  stays on screen. I haven't run or tested it.
+
+  - Server (src/app/actions.ts): generateIdeas now takes a second argument,
+    showing, which says whether a suggestion is on screen. If the queue has a
+    scored action, it starts the update in the background and answers
+    immediately:
+    - If a suggestion is showing, it returns nothing and the current one stays.
+    - If none is showing (you're still in the prompt phase), it takes out the
+      best queued action right away.
+  - Client (src/app/prompt-box.tsx): if the status panel shows actions in the
+    queue, Generate Ideas skips "Thinking…" and leaves the suggestion where it
+    is. With an empty queue it behaves as before: "Thinking…" while the full
+    update runs.
+  - Progress: the Generation status panel shows the update running. The new
+    actions join the queue, so they can come up after your next comment.
+
+  One edge case: the client counts every queued action, but the server only
+  counts scored ones. If the queue holds actions that aren't scored yet, there's
+  no "Thinking…" but the server waits for the whole update. The old suggestion
+  stays up and is then replaced by the new one when the update finishes.
+
+✻ Baked for 32s · done 22.32
+
+> Remove pruning                                                                
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(src\app\actions.ts)
+  ⎿  Added 1 line, removed 8 lines
+      108  /**
+      109   * Generates new actions from the generation state, then (in p
+           arallel) folds them into the
+      110   * suggested themes and judges every queued action against the
+            current considerations. Finally
+      111 - * re-ranks the queue and deletes its PRUNE lowest-scoring act
+          -ions.                                                         
+      111 + * logs the queue size.                                       
+      112   */
+      113  async function explore() {
+      114    const fresh = await generateActions(chooseGenerationState(al
+           lData()));
+      115    await Promise.all([foldSuggested(fresh.map((a) => a.text)), 
+           judgeActions(readSlots(), unshown())]);
+      116 -  // Rank with the latest weights (the ones the UI shows).    
+      117 -  const weights = latestWeights;                              
+      118 -  if (!weights) return;                                       
+      119 -  const bottom = rankActions(weights).slice(-PRUNE);          
+      120 -  console.log(`[queue] Re-ranked the queue; deleting the ${bot
+          -tom.length} lowest-scoring action(s):`);                      
+      121 -  for (const b of bottom) console.log(`[queue]   - (${b.score.
+          -toFixed(3)}) ${b.action.text}`);                              
+      122 -  db.delete(action).where(inArray(action.id, bottom.map((b) =>
+          - b.action.id))).run();                                        
+      116    console.log(`[queue] ${unshown().length} action(s) now queue
+           d`);
+      117  }
+      118  
+
+● Update(src\app\actions.ts)
+  ⎿  Added 2 lines, removed 5 lines
+      42   */
+      43  const unshown = () => db.select().from(action).where(isNull(act
+          ion.shownAt)).all();
+      44  
+      45 -/** How many of the lowest-scoring queued actions are deleted a
+         -fter each batch of new ones. */                                
+      46 -const PRUNE = 5;                                               
+      47 -                                                               
+      48 -/** The weights the user last set, used to rank the queue in th
+         -e background. */                                               
+      45 +/** The weights the user last set, shown with a running update.
+         + */                                                            
+      46  let latestWeights: Weights | null = null;
+      47  
+      48  /**
+      49   * Re-ranks the queue with the weights the user just set. A run
+          ning update picks them up too:
+      53 - * they are published for the UI and used when it prunes the qu
+         -eue.                                                           
+      50 + * they are published for the UI.                              
+      51   */
+      52  export async function rerankQueue(weights: Weights) {
+      53    latestWeights = Weights.parse(weights);
+
+● Update(src\app\actions.ts)
+  ⎿  Added 1 line, removed 1 line
+      1  "use server";
+      2  
+      3 -import { eq, inArray, isNull, sql } from "drizzle-orm";         
+      3 +import { eq, isNull, sql } from "drizzle-orm";                  
+      4  import { z } from "zod";
+      5  import { bestAction, rankActions, Weights } from "@/best-action"
+         ;
+      6  import { condense } from "@/condense";
+
+● Update(src\app\actions.ts)  ⎿  Added 2 lines, removed 2 lines
+      58  }
+      59  
+      60  /**
+      61 - * The update currently running in the background, if any. Only
+         - one runs at a time. It ranks                                  
+      62 - * with the latest weights; those are published with its name f
+         -or the UI.                                                     
+      61 + * The update currently running in the background, if any. Only
+         + one runs at a time. The latest                                
+      62 + * weights are published with its name for the UI.             
+      63   */
+      64  let running: Promise<void> | null = null;
+      65  function run(name: string, job: () => Promise<void>) {
+
+● Update(src\update-status.ts)
+  ⎿  Added 1 line, removed 1 line
+       5  export type UpdateStatus = {
+       6    /** Name of the running update, or null when idle. */
+       7    running: string | null;
+       8 -  /** The weights the running update ranks with. */            
+       8 +  /** The weights the user last set, shown while an update runs
+         +. */                                                           
+       9    weights: Weights | null;
+      10  };
+      11  
+
+● I removed pruning, so the queue now keeps every action. Generate Ideas no
+  longer deletes the 5 lowest-scoring ones. I haven't run or tested it.
+
+  In src/app/actions.ts:
+  - explore() now only generates new actions, updates the suggested themes,
+    scores the queue and logs how many actions are queued.
+  - The PRUNE constant and the now-unused inArray import are gone.
+  - I updated the comments that mentioned pruning, including the one on weights
+    in src/update-status.ts.
+
+  Moving the sliders still re-ranks the queue and logs the top 3. The weights
+  now only affect which action is suggested next and what the status panel
+  shows.
+
+✻ Crunched for 21s · done 22.33
+
+> Change "volatility" to "effort".                                              
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● Effort means something different from volatility, so I'll rename it
+  everywhere, including the judge's definition, the DB table and the slider
+  labels. Let me read the relevant parts first.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I'll do the mechanical rename with sed, then rewrite the descriptions by hand.
+
+● Bash(sed -i 's/volatility/effort/g; s/Volatility/Effort/g' src/best-action.ts
+      src/judge-action.ts src/db/schema.ts src/app/prompt-box.tsx
+      src/app/generation-status.t…)
+  ⎿  src/app/generation-status.tsx:7:const METRICS = ["effort", "valence",
+     "risk", "surprisingness"] as const;
+     src/app/prompt-box.tsx:10:const MEASURES = ["effort", "valence", "risk
+     … +46 lines (ctrl+o to expand)
+  ⎿  Updated src\app\generation-status.tsx (+1 -1)
+       4  import type { Slot } from "@/considerations";
+       5  import type { ServerStatus } from "@/update-status";
+       6  
+       7 -const METRICS = ["volatility", "valence", "risk", "surprisingne
+         -ss"] as const;                                                 
+       7 +const METRICS = ["effort", "valence", "risk", "surprisingness"]
+         + as const;                                                     
+       8  
+       9  /** Polls the server status (background update, queue size, gen
+          eration state) every second. */
+      10  export function useServerStatus() {
+  ⎿  Updated src\app\prompt-box.tsx (+3 -3)
+       7  import { appendToBlock, generateIdeas, rerankQueue, submitFeedb
+          ack } from "./actions";
+       8  import { GenerationStateBox, GenerationStatus, useServerStatus 
+          } from "./generation-status";
+       9  
+      10 -const MEASURES = ["volatility", "valence", "risk", "surprisingn
+         -ess"] as const;                                                
+      10 +const MEASURES = ["effort", "valence", "risk", "surprisingness"
+         +] as const;                                                    
+      11  
+      12  /** Measures whose weight runs -1–1, with labels for the two en
+          ds of the slider. */
+      13 -const ENDS = { volatility: ["stable", "upheaval"], risk: ["safe
+         -", "risky"] } as const;                                        
+      13 +const ENDS = { effort: ["stable", "upheaval"], risk: ["safe", "
+         +risky"] } as const;                                            
+      14  
+      15  /** A weight slider, 0–1 unless another minimum is given. */
+      16  function Slider({
+     ...
+      54    const [considerations, setConsiderations] = useState(initialC
+          onsiderations);
+      55    const [weights, setWeights] = useState<Weights>({
+      56      considerations: Array(7).fill(1),
+      57 -    volatility: 0, // appetite for change: -1 prefers stable, 1
+         - prefers upheaval                                              
+      57 +    effort: 0, // appetite for change: -1 prefers stable, 1 pre
+         +fers upheaval                                                  
+      58      valence: 1,
+      59      risk: 0, // risk appetite: -1 prefers safe, 1 prefers risky
+      60      surprisingness: 1,
+  ⎿  Updated src\best-action.ts (+11 -11)
+       1  import { eq, isNull } from "drizzle-orm";
+       2  import { z } from "zod";
+       3  import { db } from "@/db";
+       4 -import { action, risk, subconsideration, subScore, valence, vol
+         -atility } from "@/db/schema";                                  
+       4 +import { action, risk, subconsideration, subScore, valence, eff
+         +ort } from "@/db/schema";                                      
+       5  
+       6  const weight = z.number().min(0).max(1);
+       7  
+       8  /**
+       9   * User-set weights: one per consideration slot, one per measur
+          e and one for surprisingness.
+      10 - * The volatility and risk weights run -1–1 as appetites: volat
+         -ility -1 prefers stability, 1                                  
+      10 + * The effort and risk weights run -1–1 as appetites: effort -1
+         + prefers stability, 1                                          
+      11   * prefers upheaval; risk -1 prefers safe actions, 1 prefers ri
+          sky ones.
+      12   */
+      13  export const Weights = z.object({
+      14    considerations: z.array(weight).length(7),
+      15 -  volatility: z.number().min(-1).max(1),                       
+      15 +  effort: z.number().min(-1).max(1),                           
+      16    valence: weight,
+      17    risk: z.number().min(-1).max(1),
+      18    surprisingness: weight,
+      19  });
+      20  export type Weights = z.infer<typeof Weights>;
+      21  
+      22 -const MEASURES = ["volatility", "valence", "risk"] as const;   
+      22 +const MEASURES = ["effort", "valence", "risk"] as const;       
+      23  type Scores = Record<(typeof MEASURES)[number], number | null>;
+      24  
+      25  type Slots = {
+     ...
+      30  
+      31  /**
+      32   * How much an action moves a consideration, 0–1: the average o
+          f how much it disturbs it,
+      33 - * how strongly it costs or benefits it, and how risky it is fo
+         -r it (volatility and risk -1–1                                 
+      33 + * how strongly it costs or benefits it, and how risky it is fo
+         +r it (effort and risk -1–1                                     
+      34   * mapped to 0–1).
+      35   */
+      36 -const change = (s: Scores) => ((s.volatility! + 1) / 2 + Math.a
+         -bs(2 * s.valence! - 1) + (s.risk! + 1) / 2) / 3;               
+      36 +const change = (s: Scores) => ((s.effort! + 1) / 2 + Math.abs(2
+         + * s.valence! - 1) + (s.risk! + 1) / 2) / 3;                   
+      37  
+      38  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / 
+          xs.length;
+     … 35 more lines (ctrl+o to expand)
+  ⎿  Updated src\db\schema.ts (+4 -4)
+      89  
+      90  /**
+      91   * One row per action with 7 score slots (null until scored). V
+          alence runs 0.0–1.0 with 1 as
+      92 - * the favourable end. Volatility and risk run -1.0–1.0: volati
+         -lity -1 = barely disturbed,                                    
+      92 + * the favourable end. Effort and risk run -1.0–1.0: effort -1 
+         += barely disturbed,                                            
+      93   * 1 = upended; risk -1 = completely safe, 1 = severe risk.
+      94   */
+      95  function scoreTable(name: string, min = 0) {
+     ...
+      114    );
+      115  }
+      116  
+      117 -export const volatility = scoreTable("volatility", -1);       
+      117 +export const effort = scoreTable("effort", -1);               
+      118  export const valence = scoreTable("valence");
+      119  export const risk = scoreTable("risk", -1);
+      120  
+     ...
+      128      subconsiderationId: integer("subconsideration_id")
+      129        .notNull()
+      130        .references(() => subconsideration.id, { onDelete: "casc
+           ade" }),
+      131 -    volatility: real("volatility"),                           
+      131 +    effort: real("effort"),                                   
+      132      valence: real("valence"),
+      133      risk: real("risk"),
+      134    },
+      135    (t) => [
+      136      primaryKey({ columns: [t.actionId, t.subconsiderationId] }
+           ),
+      137 -    check("sub_score_volatility_range", sql`${t.volatility} be
+          -tween -1 and 1`),                                             
+      137 +    check("sub_score_effort_range", sql`${t.effort} between -1
+          + and 1`),                                                     
+      138      check("sub_score_valence_range", sql`${t.valence} between 
+           0 and 1`),
+      139      check("sub_score_risk_range", sql`${t.risk} between -1 and
+            1`),
+      140    ],
+  ⎿  Updated src\judge-action.ts (+5 -5)
+       4  import { z } from "zod";
+       5  import type { Slot } from "@/considerations";
+       6  import { db } from "@/db";
+       7 -import { action, risk, subScore, valence, volatility } from "@/
+         -db/schema";                                                    
+       7 +import { action, risk, subScore, valence, effort } from "@/db/s
+         +chema";                                                        
+       8  
+       9  const MODEL = "claude-haiku-5-5";
+      10  
+      11  /**
+      12 - * The three measures. Valence runs 0.0–1.0 with 1 as the favou
+         -rable end. Volatility runs                                     
+      12 + * The three measures. Valence runs 0.0–1.0 with 1 as the favou
+         +rable end. Effort runs                                         
+      13   * -1.0–1.0 from barely disturbed to upended and risk from comp
+          letely safe to severe risk;
+      14   * whether change and risk are wanted is the user's weight.
+      15   */
+      16  const MEASURES = {
+      17 -  volatility: {                                                
+      18 -    table: volatility,                                         
+      17 +  effort: {                                                    
+      18 +    table: effort,                                             
+      19      min: -1,
+      20      definition: "how much the action disturbs the consideration
+           (-1 = barely disturbed, 0 = noticeably changed, 1 = upended)",
+      21    },
+     ...
+      152      actions.slice(i * BATCH, (i + 1) * BATCH),
+      153    );
+      154    console.log(
+      155 -    `[judge] Judging ${actions.length} queued action(s) on vol
+          -atility, valence, risk and surprisingness (${batches.length} b
+          -atch(es) × 4 Haiku calls in parallel)`,                       
+      155 +    `[judge] Judging ${actions.length} queued action(s) on eff
+          +ort, valence, risk and surprisingness (${batches.length} batch
+          +(es) × 4 Haiku calls in parallel)`,                           
+      156    );
+      157    const client = new Anthropic();
+      158    await Promise.all(
+
+● Now the descriptions. Effort runs from −1 (effortless) to 1 (very demanding),
+  and the slider ends become "easy" and "hard".
+
+● Bash(sed -i \
+       -e 's/effort -1 prefers stability, 1$/effort -1 prefers easy actions, 1/'
+      \…)
+  ⎿  /**
+      * User-set weights: one per consideration slot, one per measure and o
+     ne for surprisingness.
+     … +28 lines (ctrl+o to expand)
+  ⎿  Updated src\app\prompt-box.tsx (+2 -2)
+      10  const MEASURES = ["effort", "valence", "risk", "surprisingness"
+          ] as const;
+      11  
+      12  /** Measures whose weight runs -1–1, with labels for the two en
+          ds of the slider. */
+      13 -const ENDS = { effort: ["stable", "upheaval"], risk: ["safe", "
+         -risky"] } as const;                                            
+      13 +const ENDS = { effort: ["easy", "hard"], risk: ["safe", "risky"
+         +] } as const;                                                  
+      14  
+      15  /** A weight slider, 0–1 unless another minimum is given. */
+      16  function Slider({
+     ...
+      54    const [considerations, setConsiderations] = useState(initialC
+          onsiderations);
+      55    const [weights, setWeights] = useState<Weights>({
+      56      considerations: Array(7).fill(1),
+      57 -    effort: 0, // appetite for change: -1 prefers stable, 1 pre
+         -fers upheaval                                                  
+      57 +    effort: 0, // appetite for effort: -1 prefers easy, 1 prefe
+         +rs demanding                                                   
+      58      valence: 1,
+      59      risk: 0, // risk appetite: -1 prefers safe, 1 prefers risky
+      60      surprisingness: 1,
+  ⎿  Updated src\best-action.ts (+4 -4)
+       7  
+       8  /**
+       9   * User-set weights: one per consideration slot, one per measur
+          e and one for surprisingness.
+      10 - * The effort and risk weights run -1–1 as appetites: effort -1
+         - prefers stability, 1                                          
+      11 - * prefers upheaval; risk -1 prefers safe actions, 1 prefers ri
+         -sky ones.                                                      
+      10 + * The effort and risk weights run -1–1 as appetites: effort -1
+         + prefers easy actions, 1                                       
+      11 + * prefers demanding ones; risk -1 prefers safe actions, 1 pref
+         +ers risky ones.                                                
+      12   */
+      13  export const Weights = z.object({
+      14    considerations: z.array(weight).length(7),
+     ...
+      29  const values = (s: Slots) => [s.slot1, s.slot2, s.slot3, s.slot
+          4, s.slot5, s.slot6, s.slot7];
+      30  
+      31  /**
+      32 - * How much an action moves a consideration, 0–1: the average o
+         -f how much it disturbs it,                                     
+      32 + * How much an action moves a consideration, 0–1: the average o
+         +f how much effort it takes for it,                             
+      33   * how strongly it costs or benefits it, and how risky it is fo
+          r it (effort and risk -1–1
+      34   * mapped to 0–1).
+      35   */
+     ...
+      42   * consideration's relevance is its weight × how much the actio
+          n changes it; only the 2 most
+      43   * relevant count. Each of those adds its weight × Σ (measure w
+          eight × the mean of its score and
+      44   * its subconsiderations' scores on that measure); effort and r
+          isk scores and weights run -1–1,
+      45 - * so a negative weight rewards stable/safe actions and a posit
+         -ive one disruptive/risky actions.                              
+      45 + * so a negative weight rewards easy/safe actions and a positiv
+         +e one demanding/risky actions.                                 
+      46   * On top, the action's surprisingness × its weight (0 until sc
+          ored). Recomputed for every unshown action on each call.
+      47   */
+      48  export function rankActions(weights: Weights) {
+  ⎿  Updated src\db\schema.ts (+2 -2)
+      89  
+      90  /**
+      91   * One row per action with 7 score slots (null until scored). V
+          alence runs 0.0–1.0 with 1 as
+      92 - * the favourable end. Effort and risk run -1.0–1.0: effort -1 
+         -= barely disturbed,                                            
+      93 - * 1 = upended; risk -1 = completely safe, 1 = severe risk.    
+      92 + * the favourable end. Effort and risk run -1.0–1.0: effort -1 
+         += effortless,                                                  
+      93 + * 1 = very demanding; risk -1 = completely safe, 1 = severe ri
+         +sk.                                                            
+      94   */
+      95  function scoreTable(name: string, min = 0) {
+      96    return sqliteTable(
+  ⎿  Updated src\judge-action.ts (+3 -3)
+      10  
+      11  /**
+      12   * The three measures. Valence runs 0.0–1.0 with 1 as the favou
+          rable end. Effort runs
+      13 - * -1.0–1.0 from barely disturbed to upended and risk from comp
+         -letely safe to severe risk;                                    
+      14 - * whether change and risk are wanted is the user's weight.    
+      13 + * -1.0–1.0 from effortless to very demanding and risk from com
+         +pletely safe to severe risk;                                   
+      14 + * whether effort and risk are wanted is the user's weight.    
+      15   */
+      16  const MEASURES = {
+      17    effort: {
+      18      table: effort,
+      19      min: -1,
+      20 -    definition: "how much the action disturbs the consideration
+         - (-1 = barely disturbed, 0 = noticeably changed, 1 = upended)",
+      20 +    definition: "how much effort the action takes with respect 
+         +to the consideration (-1 = effortless, 0 = moderate effort, 1 =
+         + very demanding)",                                             
+      21    },
+      22    valence: {
+      23      table: valence,
+
+● Bash(sed -i 's/import { action, risk, subconsideration, subScore, valence,
+      effort }/import { action, effort, risk, subconsideration, subScore,
+      valence }/' src/best-a…)
+  ⎿  src/best-action.ts:4:import { action, effort, risk, subconsideration,
+     subScore, valence } from "@/db/schema";
+     src/judge-action.ts:7:import { action, effort, risk, subScore, valence
+      } from "@/db/schema";
+  ⎿  Updated src\best-action.ts (+1 -1)
+      1  import { eq, isNull } from "drizzle-orm";
+      2  import { z } from "zod";
+      3  import { db } from "@/db";
+      4 -import { action, risk, subconsideration, subScore, valence, effo
+        -rt } from "@/db/schema";                                        
+      4 +import { action, effort, risk, subconsideration, subScore, valen
+        +ce } from "@/db/schema";                                        
+      5  
+      6  const weight = z.number().min(0).max(1);
+      7  
+  ⎿  Updated src\judge-action.ts (+1 -1)
+       4  import { z } from "zod";
+       5  import type { Slot } from "@/considerations";
+       6  import { db } from "@/db";
+       7 -import { action, risk, subScore, valence, effort } from "@/db/s
+         -chema";                                                        
+       7 +import { action, effort, risk, subScore, valence } from "@/db/s
+         +chema";                                                        
+       8  
+       9  const MODEL = "claude-haiku-5-5";
+      10  
+
+● I renamed "volatility" to "effort" throughout the code and changed what it
+  means. Effort now runs from −1 (effortless) to 1 (very demanding). Nothing has
+  been run yet, and the database needs updating before the app works.
+
+  - Database (src/db/schema.ts): the volatility table is now effort, and the
+    sub_score.volatility column is now sub_score.effort.
+  - Judge (src/judge-action.ts): Haiku now scores how much effort an action
+    takes for each consideration (−1 = effortless, 0 = moderate effort, 1 = very
+    demanding). The old question was how much the action disturbs the
+    consideration.
+  - Ranking (src/best-action.ts): the weight is now an appetite for effort. −1
+    prefers easy actions and +1 prefers demanding ones; it defaults to 0.
+  - UI: the slider is called "Effort", with "easy" and "hard" at its ends, and
+    the status panel shows "effort" too.
+
+  The effort: "low"/"high" settings in the model API calls are a separate option
+  and I left them alone.
+
+  To update the database, run one of these:
+  - npm run db:reset deletes the whole database (prompt answers, considerations
+    and queued actions) and recreates it.
+  - npm run db:push keeps the data, but drizzle-kit will ask whether effort is a
+    rename of volatility. Even if you say yes, the existing scores are
+    disturbance scores, so they'll be wrong as effort scores. Those actions
+    would need judging again.
+
+✻ Crunched for 33s · done 22.34
+
+※ recap: You're tuning how the career planner ranks and shows suggested actions, and volatility was just renamed to effort everywhere. Next, run npm run db:reset (it deletes all data) or npm run db:push, then test the app. (disable recaps in /config)

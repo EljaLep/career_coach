@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { Slot } from "@/considerations";
 import type { ServerStatus } from "@/update-status";
 
-const METRICS = ["volatility", "valence", "risk", "surprisingness"] as const;
+const METRICS = ["effort", "valence", "risk", "surprisingness"] as const;
 
 /** Polls the server status (background update, queue size, generation state) every second. */
 export function useServerStatus() {

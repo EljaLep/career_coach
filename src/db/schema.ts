@@ -89,8 +89,8 @@ export const action = sqliteTable(
 
 /**
  * One row per action with 7 score slots (null until scored). Valence runs 0.0–1.0 with 1 as
- * the favourable end. Volatility and risk run -1.0–1.0: volatility -1 = barely disturbed,
- * 1 = upended; risk -1 = completely safe, 1 = severe risk.
+ * the favourable end. Effort and risk run -1.0–1.0: effort -1 = effortless,
+ * 1 = very demanding; risk -1 = completely safe, 1 = severe risk.
  */
 function scoreTable(name: string, min = 0) {
   return sqliteTable(
@@ -114,7 +114,7 @@ function scoreTable(name: string, min = 0) {
   );
 }
 
-export const volatility = scoreTable("volatility", -1);
+export const effort = scoreTable("effort", -1);
 export const valence = scoreTable("valence");
 export const risk = scoreTable("risk", -1);
 
@@ -128,13 +128,13 @@ export const subScore = sqliteTable(
     subconsiderationId: integer("subconsideration_id")
       .notNull()
       .references(() => subconsideration.id, { onDelete: "cascade" }),
-    volatility: real("volatility"),
+    effort: real("effort"),
     valence: real("valence"),
     risk: real("risk"),
   },
   (t) => [
     primaryKey({ columns: [t.actionId, t.subconsiderationId] }),
-    check("sub_score_volatility_range", sql`${t.volatility} between -1 and 1`),
+    check("sub_score_effort_range", sql`${t.effort} between -1 and 1`),
     check("sub_score_valence_range", sql`${t.valence} between 0 and 1`),
     check("sub_score_risk_range", sql`${t.risk} between -1 and 1`),
   ],

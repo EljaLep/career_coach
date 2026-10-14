@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, inArray, isNull, sql } from "drizzle-orm";
+import { eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { bestAction, rankActions, Weights } from "@/best-action";
 import { condense } from "@/condense";
@@ -42,15 +42,24 @@ function allData() {
  */
 const unshown = () => db.select().from(action).where(isNull(action.shownAt)).all();
 
-/** How many of the lowest-scoring queued actions are deleted after each batch of new ones. */
-const PRUNE = 5;
-
-/** The weights from the latest request, used to rank the queue in the background. */
+/** The weights the user last set, shown with a running update. */
 let latestWeights: Weights | null = null;
 
 /**
- * The update currently running in the background, if any. Only one runs at a time. It ranks
- * with the weights from when it started; those are published with its name for the UI.
+ * Re-ranks the queue with the weights the user just set. A running update picks them up too:
+ * they are published for the UI.
+ */
+export async function rerankQueue(weights: Weights) {
+  latestWeights = Weights.parse(weights);
+  if (updateStatus.running) updateStatus.weights = latestWeights;
+  const ranked = rankActions(latestWeights);
+  console.log(`[queue] Weights changed; re-ranked ${ranked.length} queued action(s)`);
+  for (const r of ranked.slice(0, 3)) console.log(`[queue]   + (${r.score.toFixed(3)}) ${r.action.text}`);
+}
+
+/**
+ * The update currently running in the background, if any. Only one runs at a time. The latest
+ * weights are published with its name for the UI.
  */
 let running: Promise<void> | null = null;
 function run(name: string, job: () => Promise<void>) {
@@ -96,18 +105,11 @@ async function updateConsiderations() {
 /**
  * Generates new actions from the generation state, then (in parallel) folds them into the
  * suggested themes and judges every queued action against the current considerations. Finally
- * re-ranks the queue and deletes its PRUNE lowest-scoring actions.
+ * logs the queue size.
  */
 async function explore() {
   const fresh = await generateActions(chooseGenerationState(allData()));
   await Promise.all([foldSuggested(fresh.map((a) => a.text)), judgeActions(readSlots(), unshown())]);
-  // Rank with the weights the update started with (the ones the UI shows).
-  const weights = updateStatus.weights;
-  if (!weights) return;
-  const bottom = rankActions(weights).slice(-PRUNE);
-  console.log(`[queue] Re-ranked the queue; deleting the ${bottom.length} lowest-scoring action(s):`);
-  for (const b of bottom) console.log(`[queue]   - (${b.score.toFixed(3)}) ${b.action.text}`);
-  db.delete(action).where(inArray(action.id, bottom.map((b) => b.action.id))).run();
   console.log(`[queue] ${unshown().length} action(s) now queued`);
 }
 
@@ -133,19 +135,29 @@ async function takeBest(weights: Weights) {
 /**
  * The only place model calls happen: brings the considerations up to date with the gathered
  * data, chooses a new random generation state, generates and judges new actions, then suggests
- * the best one.
+ * the best one. If the queue already has a scored action, the update runs in the background and
+ * the answer comes at once: null (keep the shown suggestion) when `showing`, else the best queued
+ * action.
  */
-export async function generateIdeas(weights: Weights) {
+export async function generateIdeas(weights: Weights, showing: boolean) {
   latestWeights = Weights.parse(weights);
   console.log("[ideas] Generate Ideas pressed");
-  if (running) {
-    console.log("[ideas] An update is running; waiting for it to finish first");
-    await running;
+  // run() catches its own errors, so this never rejects.
+  const update = (async () => {
+    if (running) {
+      console.log("[ideas] An update is running; waiting for it to finish first");
+      await running;
+    }
+    await run("Generate Ideas", async () => {
+      await updateConsiderations();
+      await explore();
+    });
+  })();
+  if (bestAction(latestWeights)) {
+    console.log("[ideas] Queue has actions; updating in the background");
+    return { suggestion: showing ? null : await takeBest(weights), considerations: readSlots() };
   }
-  await run("Generate Ideas", async () => {
-    await updateConsiderations();
-    await explore();
-  });
+  await update;
   return { suggestion: await takeBest(weights), considerations: readSlots() };
 }
 

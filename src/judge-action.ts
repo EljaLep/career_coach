@@ -4,20 +4,20 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Slot } from "@/considerations";
 import { db } from "@/db";
-import { action, risk, subScore, valence, volatility } from "@/db/schema";
+import { action, effort, risk, subScore, valence } from "@/db/schema";
 
 const MODEL = "claude-haiku-5-5";
 
 /**
- * The three measures. Valence runs 0.0–1.0 with 1 as the favourable end. Volatility runs
- * -1.0–1.0 from barely disturbed to upended and risk from completely safe to severe risk;
- * whether change and risk are wanted is the user's weight.
+ * The three measures. Valence runs 0.0–1.0 with 1 as the favourable end. Effort runs
+ * -1.0–1.0 from effortless to very demanding and risk from completely safe to severe risk;
+ * whether effort and risk are wanted is the user's weight.
  */
 const MEASURES = {
-  volatility: {
-    table: volatility,
+  effort: {
+    table: effort,
     min: -1,
-    definition: "how much the action disturbs the consideration (-1 = barely disturbed, 0 = noticeably changed, 1 = upended)",
+    definition: "how much effort the action takes with respect to the consideration (-1 = effortless, 0 = moderate effort, 1 = very demanding)",
   },
   valence: {
     table: valence,
@@ -152,7 +152,7 @@ export async function judgeActions(slots: Slot[], actions: { id: number; text: s
     actions.slice(i * BATCH, (i + 1) * BATCH),
   );
   console.log(
-    `[judge] Judging ${actions.length} queued action(s) on volatility, valence, risk and surprisingness (${batches.length} batch(es) × 4 Haiku calls in parallel)`,
+    `[judge] Judging ${actions.length} queued action(s) on effort, valence, risk and surprisingness (${batches.length} batch(es) × 4 Haiku calls in parallel)`,
   );
   const client = new Anthropic();
   await Promise.all(

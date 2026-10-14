@@ -15,16 +15,16 @@ export const PROMPTS: Prompt[] = [
   {
     title: "What do you have?",
     body: "Resources available to you: money, time, network, location, health, tools, credentials. Focus on things you know are relevant to your career.",
-    hint: "How many hours per week could you realistically invest? What's your financial runway? I have ...",
+    hint: "I have ...",
   },
   {
     title: "What worries you?",
     body: "Concerns, fears, and things you want to avoid in your career or life.",
-    hint: "What would make a path a non-starter? I don't want ...",
+    hint: "I don't want ...",
   },
   {
     title: "What drains and energises you?",
-    body: "Activities, environments and people that give or take energy. I love ...",
+    body: "I love... I hate...",
   },
   {
     title: "Constraints & commitments",
